@@ -1,41 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 
-const DEFAULT_KEYWORDS = [
-  "Camisetas de futbol",
-  "Camisetas",
-  "Boca",
-  "River",
-  "Huracan",
-  "Racing",
-  "Argentina",
-  "Independiente",
-  "San Lorenzo",
-  "Velez",
-];
-
-const KEYWORDS_STORAGE_KEY = "ml-watch:keywords";
-const SEEN_STORAGE_KEY = "ml-watch:seen";
-const MAX_SEEN_PER_KEYWORD = 400;
-
-function loadKeywords() {
-  try {
-    const raw = localStorage.getItem(KEYWORDS_STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (e) {}
-  return DEFAULT_KEYWORDS;
-}
-
-function loadSeen() {
-  try {
-    const raw = localStorage.getItem(SEEN_STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (e) {}
-  return {};
-}
+const HOUR_OPTIONS = [2, 6, 24, 48];
+const DEFAULT_HOURS = 24;
+const AUTO_REFRESH_MS = 5 * 60 * 1000; // 5 min — solo relee la cache en Redis, no scrapea de nuevo
+const NEW_BADGE_WINDOW_MS = 90 * 60 * 1000; // marca "NUEVO" lo visto en la última hora y media
 
 function formatPrice(price, currency) {
+  if (price === null || price === undefined) return "Consultar precio";
   try {
     return new Intl.NumberFormat("es-AR", {
       style: "currency",
@@ -43,96 +16,69 @@ function formatPrice(price, currency) {
       maximumFractionDigits: 0,
     }).format(price);
   } catch (e) {
-    return `${currency} ${price}`;
+    return `${currency ?? ""} ${price}`;
   }
 }
 
+function formatRelative(ms) {
+  if (!ms) return "";
+  const diff = Date.now() - ms;
+  const min = Math.round(diff / 60000);
+  if (min < 1) return "recién";
+  if (min < 60) return `hace ${min} min`;
+  const hs = Math.round(min / 60);
+  if (hs < 48) return `hace ${hs} h`;
+  const days = Math.round(hs / 24);
+  return `hace ${days} d`;
+}
+
 export default function Home() {
-  const [keywords, setKeywords] = useState(DEFAULT_KEYWORDS);
-  const [newKeyword, setNewKeyword] = useState("");
+  const [hours, setHours] = useState(DEFAULT_HOURS);
+  const [keywords, setKeywords] = useState([]);
   const [data, setData] = useState({});
   const [errors, setErrors] = useState({});
-  const [loading, setLoading] = useState(false);
-  const [authUrl, setAuthUrl] = useState(null);
-  const [lastUpdated, setLastUpdated] = useState(null);
+  const [lastScraped, setLastScraped] = useState(null);
+  const [lastErrors, setLastErrors] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [fetchFailed, setFetchFailed] = useState(false);
 
-  useEffect(() => {
-    setKeywords(loadKeywords());
-  }, []);
-
-  const totalNew = useMemo(() => {
-    return Object.values(data).reduce(
-      (acc, items) => acc + items.filter((i) => i.isNew).length,
-      0
-    );
-  }, [data]);
-
-  async function refresh(currentKeywords) {
-    const list = currentKeywords || keywords;
-    if (list.length === 0) return;
+  const refresh = useCallback(async (h) => {
     setLoading(true);
-    setAuthUrl(null);
-
+    setFetchFailed(false);
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(list.join(","))}`);
+      const res = await fetch(`/api/search?hours=${h}`);
       const json = await res.json();
-
-      if (res.status === 401 && json.authUrl) {
-        setAuthUrl(json.authUrl);
-        setLoading(false);
-        return;
-      }
-
       if (!json.ok) {
-        setLoading(false);
+        setFetchFailed(true);
         return;
       }
-
-      const seen = loadSeen();
-      const nextSeen = { ...seen };
-      const withNewFlag = {};
-
-      for (const keyword of list) {
-        const items = json.results[keyword] || [];
-        const seenIds = new Set(seen[keyword] || []);
-        withNewFlag[keyword] = items.map((item) => ({
-          ...item,
-          isNew: !seenIds.has(item.id),
-        }));
-        const mergedIds = [...new Set([...items.map((i) => i.id), ...(seen[keyword] || [])])];
-        nextSeen[keyword] = mergedIds.slice(0, MAX_SEEN_PER_KEYWORD);
-      }
-
-      localStorage.setItem(SEEN_STORAGE_KEY, JSON.stringify(nextSeen));
-      setData(withNewFlag);
+      setKeywords(json.keywords || []);
+      setData(json.results || {});
       setErrors(json.errors || {});
-      setLastUpdated(new Date());
+      setLastScraped(json.lastScraped || null);
+      setLastErrors(json.lastErrors || {});
+    } catch (e) {
+      setFetchFailed(true);
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
-    if (keywords.length > 0) refresh(keywords);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [keywords.length === DEFAULT_KEYWORDS.length ? "init" : "changed"]);
+    refresh(hours);
+  }, [hours, refresh]);
 
-  function persistKeywords(list) {
-    setKeywords(list);
-    localStorage.setItem(KEYWORDS_STORAGE_KEY, JSON.stringify(list));
-    refresh(list);
-  }
+  // Relee cada 5 minutos por si el scraper corrió entre medio — es solo una
+  // lectura a Redis, así que no tiene costo pegarle seguido.
+  useEffect(() => {
+    const id = setInterval(() => refresh(hours), AUTO_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [hours, refresh]);
 
-  function addKeyword() {
-    const value = newKeyword.trim();
-    if (!value || keywords.includes(value)) return;
-    persistKeywords([...keywords, value]);
-    setNewKeyword("");
-  }
-
-  function removeKeyword(kw) {
-    persistKeywords(keywords.filter((k) => k !== kw));
-  }
+  const totalItems = useMemo(
+    () => Object.values(data).reduce((acc, items) => acc + items.length, 0),
+    [data]
+  );
 
   return (
     <div className="page">
@@ -140,86 +86,85 @@ export default function Home() {
         <div>
           <h1>ML Watch</h1>
           <div className="subtitle">
-            {lastUpdated
-              ? `Actualizado ${lastUpdated.toLocaleTimeString("es-AR")}`
-              : "Publicaciones de Mercado Libre por palabra clave"}
-            {totalNew > 0 && ` · ${totalNew} nuevas`}
+            {lastScraped
+              ? `Último rastreo: ${formatRelative(new Date(lastScraped).getTime())}`
+              : "Publicaciones usadas de Mercado Libre por palabra clave"}
+            {totalItems > 0 && ` · ${totalItems} publicaciones`}
           </div>
         </div>
-        <button className="btn-primary" onClick={() => refresh()} disabled={loading}>
+        <button className="btn-primary" onClick={() => refresh(hours)} disabled={loading}>
           {loading ? "Actualizando…" : "Actualizar"}
         </button>
       </div>
 
-      {authUrl && (
-        <div className="auth-box">
-          Todavía no autorizaste esta app contra tu cuenta de Mercado Libre.{" "}
-          <a href={authUrl} className="btn-primary" style={{ textDecoration: "none", padding: "6px 12px", borderRadius: 6 }}>
-            Autorizar ahora
-          </a>
-        </div>
-      )}
-
-      <div className="keyword-bar">
-        {keywords.map((kw) => (
-          <div className="chip" key={kw}>
-            {kw}
-            <button onClick={() => removeKeyword(kw)} title="Quitar">
-              ×
-            </button>
-          </div>
+      <div className="hours-bar">
+        {HOUR_OPTIONS.map((h) => (
+          <button
+            key={h}
+            className={h === hours ? "chip chip-active" : "chip"}
+            onClick={() => setHours(h)}
+          >
+            Últimas {h} hs
+          </button>
         ))}
       </div>
 
-      <div className="add-keyword">
-        <input
-          placeholder="Agregar palabra clave (ej: camiseta racing 2026)"
-          value={newKeyword}
-          onChange={(e) => setNewKeyword(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && addKeyword()}
-        />
-        <button className="btn-ghost" onClick={addKeyword}>
-          Agregar
-        </button>
-      </div>
+      {fetchFailed && (
+        <div className="error" style={{ marginBottom: 20 }}>
+          No se pudo leer la información. Probá actualizar de nuevo en un rato.
+        </div>
+      )}
+
+      {!fetchFailed && !loading && keywords.length === 0 && (
+        <div className="empty">
+          Todavía no hay datos. El rastreo corre una vez por hora — esperá al primer
+          ciclo o dispará el workflow manualmente desde GitHub Actions ("Run workflow").
+        </div>
+      )}
 
       {keywords.map((keyword) => {
         const items = data[keyword];
         const error = errors[keyword];
+        const scrapeError = lastErrors[keyword];
         return (
           <div className="group" key={keyword}>
             <h2>
               {keyword}
               {items && <span className="count">({items.length})</span>}
             </h2>
-            {error && <div className="error">Error: {error}</div>}
-            {!error && !items && loading && <div className="loading">Buscando…</div>}
+            {error && <div className="error">Error leyendo datos: {error}</div>}
+            {!error && scrapeError && (
+              <div className="error">
+                El último rastreo de &quot;{keyword}&quot; falló: {scrapeError}. Mostrando lo
+                último que se guardó con éxito.
+              </div>
+            )}
             {!error && items && items.length === 0 && (
-              <div className="empty">Sin resultados.</div>
+              <div className="empty">Sin publicaciones en esta ventana de tiempo.</div>
             )}
             {items && items.length > 0 && (
               <div className="grid">
-                {items.map((item) => (
-                  <a
-                    key={item.id}
-                    className="card"
-                    href={item.permalink}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    {item.isNew && <span className="badge-new">NUEVO</span>}
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={item.thumbnail} alt={item.title} loading="lazy" />
-                    <div className="card-body">
-                      <div className="card-title">{item.title}</div>
-                      <div className="card-price">{formatPrice(item.price, item.currency)}</div>
-                      <div className="card-meta">
-                        {item.condition === "new" ? "Nuevo" : "Usado"}
-                        {item.freeShipping ? " · Envío gratis" : ""}
+                {items.map((item) => {
+                  const isNew = Date.now() - item.firstSeenAt < NEW_BADGE_WINDOW_MS;
+                  return (
+                    <a
+                      key={item.id}
+                      className="card"
+                      href={item.permalink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {isNew && <span className="badge-new">NUEVO</span>}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={item.thumbnail} alt={item.title} loading="lazy" />
+                      <div className="card-body">
+                        <div className="card-title">{item.title}</div>
+                        <div className="card-price">{formatPrice(item.price, item.currency)}</div>
+                        <div className="card-meta">{formatRelative(item.firstSeenAt)}</div>
                       </div>
-                    </div>
-                  </a>
-                ))}
+                    </a>
+                  );
+                })}
               </div>
             )}
           </div>

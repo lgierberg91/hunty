@@ -1,87 +1,93 @@
 # ML Watch
 
-Webapp chiquita para ver publicaciones nuevas de Mercado Libre por palabra clave
-("Boca", "River", "camisetas", etc.), con badge de "NUEVO" y 100% gratis para hostear.
+Webapp chiquita y gratis para ver, cada hora, las publicaciones **usadas**
+nuevas de Mercado Libre por palabra clave ("Boca", "River", "camisetas",
+etc.), acumuladas en un catálogo de hasta 48hs con badge de "NUEVO",
+ordenado de más nuevo a más viejo.
 
 ## Cómo funciona
 
-- El **backend** (rutas de API de Next.js) le pega a la API oficial de búsqueda de
-  Mercado Libre (`/sites/MLA/search`) por cada palabra clave.
-- Esa API **requiere estar logueado vía OAuth** (ya no es abierta). Por eso hay
-  un login único contra tu propia cuenta de Mercado Libre, y el token se guarda
-  en una base Redis gratuita (Upstash) para que se vaya renovando solo.
-- El **frontend** guarda en el navegador (localStorage) qué IDs de publicaciones
-  ya viste, para marcar como "NUEVO" solo lo que apareció desde la última vez.
-  Esto es por navegador/dispositivo — no hace falta base de datos para eso.
-- Las palabras clave se guardan también en tu navegador, así que las podés
-  agregar/sacar desde la webapp sin tocar código.
+Son dos partes separadas, las dos gratis:
 
-## 1. Crear la app en Mercado Libre (gratis)
+1. **El scraper** (`/scraper`): un script de Node + Playwright (navegador
+   real) que corre **una vez por hora** en GitHub Actions. Para cada palabra
+   clave en `scraper/keywords.json` abre la búsqueda de Mercado Libre
+   filtrada a condición **"Usado"**, saca los resultados orgánicos (no los
+   "Promocionados"), y los guarda en una base Redis gratuita (Upstash):
+   - `mlwatch:itemdata:<keyword>` — datos de cada publicación (título,
+     precio, foto, link), siempre actualizados con lo último visto.
+   - `mlwatch:feed:<keyword>` — un registro de "cuándo vi cada publicación
+     por primera vez", que se poda automáticamente a una ventana de 48hs.
+     Esto es lo que arma el catálogo acumulado: no importa si no abrís la
+     app en todo el día, el feed va guardando todo lo que fue apareciendo.
 
-1. Entrá a https://developers.mercadolibre.com.ar/ con tu cuenta de ML.
-2. "Crear aplicación" (o "Mis aplicaciones" → "Crear nueva aplicación").
-3. Completá los campos. Lo único que importa acá:
-   - **Redirect URI**: por ahora poné `http://localhost:3000/api/auth/callback`
-     (cuando despliegues en Vercel, agregás también la URL de producción).
-4. Guardá el `Client ID` y el `Client Secret` que te da.
+2. **La webapp** (Next.js en Vercel): solo *lee* lo que el scraper ya dejó
+   guardado en Redis, así que abre siempre al instante. Tiene un filtro de
+   "últimas 2 / 6 / 24 / 48 horas" y muestra todo ordenado de más nuevo a
+   más viejo, con badge "NUEVO" para lo agregado en la última hora y media.
 
-## 2. Crear la base Redis gratis (Upstash)
+No hace falta crear ninguna app en Mercado Libre ni loguearse con OAuth —
+eso era necesario para pegarle a la API oficial de búsqueda, que Mercado
+Libre cerró para apps de terceros. Este enfoque scrapea la web pública
+directamente con un navegador, como lo haría una persona.
 
-1. Entrá a https://upstash.com/ y creá una cuenta gratis.
-2. Creá una base "Redis" (Free tier alcanza de sobra para esto).
-3. Copiá el `UPSTASH_REDIS_REST_URL` y el `UPSTASH_REDIS_REST_TOKEN` que te muestra.
+> ⚠️ **Dos cosas sin confirmar 100% en un scrape real todavía** (se
+> implementaron con el mejor criterio disponible, pero conviene revisarlas
+> después de la primera corrida real en GitHub Actions):
+> 1. El filtro de condición "Usado" en la URL (`_ITEM%2ACONDITION_2230581`).
+>    Si Mercado Libre cambió ese ID, el scraper cae automáticamente a
+>    traer todo sin filtrar por condición para esa palabra clave (mejor
+>    tener resultados de más que quedarte sin nada), y lo vas a poder ver
+>    en los logs de GitHub Actions como advertencia.
+> 2. La consulta a Redis que arma el orden "más nuevo primero" en
+>    `app/api/search/route.js`. La lógica está probada localmente, pero no
+>    pude probarla en vivo contra tu base de Upstash desde este entorno
+>    (el sandbox no tiene salida de red a `upstash.io`). Si al abrir la
+>    app ves algo raro en el orden, avisame y lo ajustamos.
 
-## 3. Configurar variables de entorno
+## 1. Configurar el scraper (GitHub Actions)
 
-Copiá `.env.example` a `.env.local` y completá los valores:
+El repo ya incluye `scraper/` y `.github/workflows/scrape.yml`, configurado
+para correr cada hora en punto. Solo falta darle acceso a tu Redis:
+
+1. En GitHub, andá a tu repo → **Settings** → **Secrets and variables** →
+   **Actions** → **New repository secret**.
+2. Creá estos dos secrets (los mismos valores que ya usás en Vercel):
+   - `UPSTASH_REDIS_REST_URL`
+   - `UPSTASH_REDIS_REST_TOKEN`
+3. Para no esperar hasta la próxima hora en punto: andá a la pestaña
+   **Actions** del repo → workflow **"Scrape Mercado Libre"** → botón
+   **"Run workflow"** → **Run workflow**. Tarda 1-3 minutos; podés ver el
+   progreso y los logs ahí mismo.
+
+Si querés editar las palabras clave, es el archivo `scraper/keywords.json`
+(un array de strings) — cambiálo, hacé commit y push, y el próximo scrape
+ya las usa.
+
+## 2. La webapp en Vercel
+
+Ya está desplegada. Las únicas variables de entorno que necesita son las
+mismas de Upstash:
 
 ```
-ML_CLIENT_ID=...
-ML_CLIENT_SECRET=...
-ML_REDIRECT_URI=http://localhost:3000/api/auth/callback
-ML_SITE_ID=MLA
 UPSTASH_REDIS_REST_URL=...
 UPSTASH_REDIS_REST_TOKEN=...
 ```
 
-## 4. Probar en local
-
-```bash
-npm install
-npm run dev
-```
-
-Abrí http://localhost:3000 — te va a aparecer un botón "Autorizar ahora".
-Hacé click, logueate con tu cuenta de Mercado Libre, aceptá los permisos, y
-volvés automáticamente a la app ya autorizada. Este paso se hace **una sola vez**
-(el token se renueva solo después).
-
-## 5. Desplegar gratis en Vercel
-
-1. Subí este proyecto a un repo de GitHub.
-2. Entrá a https://vercel.com/, "Add New Project", importá el repo.
-3. En "Environment Variables" cargá las mismas variables del `.env.local`,
-   pero con `ML_REDIRECT_URI=https://TU-APP.vercel.app/api/auth/callback`
-   (usá la URL real que te asigna Vercel).
-4. Deploy.
-5. Volvé a la app de Mercado Libre (paso 1) y agregá esa misma URL de producción
-   como otra Redirect URI válida.
-6. Entrá a `https://TU-APP.vercel.app/api/auth/start` una vez para autorizar
-   en producción (es el mismo paso que en local, contra el token de prod).
-
-Listo: la URL de Vercel es tu webapp, la podés abrir desde el celu o la compu
-cuando quieras.
+Si en algún momento limpiás las variables viejas de Mercado Libre
+(`ML_CLIENT_ID`, `ML_CLIENT_SECRET`, `ML_REDIRECT_URI`, `ML_SITE_ID`) de
+Vercel, no pasa nada — ya no se usan, quedaron de un enfoque anterior
+(OAuth contra la API oficial) que Mercado Libre bloqueó para apps nuevas.
+Podés borrarlas cuando quieras o dejarlas, es indistinto.
 
 ## Límites / cosas a saber
 
-- El plan free de Upstash y Vercel alcanzan sobra para uso personal (unas
-  pocas búsquedas por visita).
-- El "NUEVO" es por navegador (localStorage). Si abrís desde otro dispositivo,
-  al principio te va a marcar todo como nuevo una vez, y después ya sigue el
-  historial de ese dispositivo.
-- Esto NO manda notificaciones solo — es "abrís la página y ves lo nuevo".
-  Si más adelante querés que te avise (mail, Telegram) sin que abras la app,
-  el siguiente paso natural es un Vercel Cron Job que corra el mismo fetch
-  cada X horas, guarde los IDs vistos en Redis (server-side en vez de
-  localStorage) y dispare un mensaje cuando encuentre algo nuevo. Puedo armarte
-  esa parte también si querés avanzar con eso.
+- El plan free de Upstash y GitHub Actions alcanzan de sobra para este uso
+  (1 scrape por hora, ~10 palabras clave).
+- El catálogo se poda solo a 48hs — no vas a acumular publicaciones viejas
+  para siempre.
+- Esto sigue siendo "abrís la webapp y ves lo nuevo", no manda notificaciones
+  push ni mensajes. Si más adelante lo querés, el siguiente paso natural es
+  que el mismo workflow de GitHub Actions, además de guardar en Redis,
+  mande un mensaje (mail, Telegram, etc.) cuando encuentre algo nuevo. Se
+  puede armar reutilizando el mismo scraper.

@@ -1,71 +1,38 @@
 import { NextResponse } from "next/server";
-import { getValidAccessToken } from "../../../lib/mlAuth";
+import { getRedis } from "../../../lib/redis";
 
 export const dynamic = "force-dynamic";
 
-const SITE_ID = process.env.ML_SITE_ID || "MLA";
+// Esta ruta ya NO le pega a Mercado Libre en el momento en que alguien abre
+// la webapp. Lee el "feed" que el scraper (GitHub Actions, ver /scraper) va
+// armando en Redis cada hora: para cada palabra clave hay
+//   - mlwatch:feed:<keyword>      (sorted set: id -> primera vez que lo vimos)
+//   - mlwatch:itemdata:<keyword>  (hash: id -> datos del item, siempre al día)
+// Así la respuesta es instantánea, y podemos devolver "todo lo que apareció
+// en las últimas N horas" aunque el usuario no haya mirado la app en horas.
 
-function upgradeThumbnail(url) {
-  if (!url) return url;
-  return url.replace(/^http:/, "https:").replace(/-I\.(jpg|webp)$/i, "-O.$1");
-}
-
-async function searchOne(keyword, accessToken) {
-  const url = new URL(`https://api.mercadolibre.com/sites/${SITE_ID}/search`);
-  url.searchParams.set("q", keyword);
-  url.searchParams.set("limit", "30");
-
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-    // Evita que Next cachee resultados viejos.
-    cache: "no-store",
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`ML search falló para "${keyword}": ${res.status} ${text}`);
-  }
-
-  const json = await res.json();
-
-  return (json.results || []).map((item) => ({
-    id: item.id,
-    title: item.title,
-    price: item.price,
-    currency: item.currency_id,
-    permalink: item.permalink,
-    thumbnail: upgradeThumbnail(item.thumbnail),
-    condition: item.condition,
-    freeShipping: !!(item.shipping && item.shipping.free_shipping),
-    seller: item.seller && item.seller.nickname,
-    keyword,
-  }));
-}
+const DEFAULT_HOURS = 24;
+const MAX_HOURS = 48;
 
 export async function GET(request) {
-  const q = request.nextUrl.searchParams.get("q") || "";
-  const keywords = q
+  const redis = getRedis();
+
+  const qParam = request.nextUrl.searchParams.get("q") || "";
+  let keywords = qParam
     .split(",")
     .map((k) => k.trim())
     .filter(Boolean);
 
   if (keywords.length === 0) {
-    return NextResponse.json({ ok: false, error: "Pasá al menos una keyword con ?q=" }, { status: 400 });
+    keywords = (await redis.get("mlwatch:keywords")) || [];
   }
 
-  let accessToken;
-  try {
-    accessToken = await getValidAccessToken();
-  } catch (err) {
-    const msg = String(err.message || err);
-    if (msg.startsWith("NOT_AUTHORIZED")) {
-      return NextResponse.json(
-        { ok: false, error: "not_authorized", authUrl: "/api/auth/start" },
-        { status: 401 }
-      );
-    }
-    return NextResponse.json({ ok: false, error: msg }, { status: 500 });
-  }
+  let hours = parseInt(request.nextUrl.searchParams.get("hours"), 10);
+  if (!Number.isFinite(hours) || hours <= 0) hours = DEFAULT_HOURS;
+  hours = Math.min(hours, MAX_HOURS);
+
+  const now = Date.now();
+  const since = now - hours * 60 * 60 * 1000;
 
   const results = {};
   const errors = {};
@@ -73,12 +40,54 @@ export async function GET(request) {
   await Promise.all(
     keywords.map(async (keyword) => {
       try {
-        results[keyword] = await searchOne(keyword, accessToken);
+        const feedKey = `mlwatch:feed:${keyword}`;
+        const dataKey = `mlwatch:itemdata:${keyword}`;
+
+        // Ids vistos por primera vez dentro de la ventana, en orden ascendente
+        // (más viejo primero) — los damos vuelta después para que quede de
+        // más nuevo a más viejo, como pidió Leo.
+        const raw = await redis.zrange(feedKey, since, now, {
+          byScore: true,
+          withScores: true,
+        });
+
+        const pairs = [];
+        for (let i = 0; i < raw.length; i += 2) {
+          pairs.push({ id: String(raw[i]), firstSeenAt: Number(raw[i + 1]) });
+        }
+        pairs.reverse();
+
+        if (pairs.length === 0) {
+          results[keyword] = [];
+          return;
+        }
+
+        const rawItems = await redis.hmget(dataKey, ...pairs.map((p) => p.id));
+
+        results[keyword] = pairs
+          .map(({ id, firstSeenAt }) => {
+            const value = rawItems ? rawItems[id] : null;
+            if (!value) return null;
+            const item = typeof value === "string" ? JSON.parse(value) : value;
+            return { ...item, firstSeenAt };
+          })
+          .filter(Boolean);
       } catch (err) {
         errors[keyword] = String(err.message || err);
       }
     })
   );
 
-  return NextResponse.json({ ok: true, results, errors });
+  const lastScraped = await redis.get("mlwatch:lastScraped");
+  const lastErrors = (await redis.get("mlwatch:lastErrors")) || {};
+
+  return NextResponse.json({
+    ok: true,
+    hours,
+    keywords,
+    results,
+    errors,
+    lastScraped,
+    lastErrors,
+  });
 }

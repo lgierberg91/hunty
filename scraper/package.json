@@ -1,0 +1,13 @@
+{
+  "name": "ml-watch-scraper",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "scrape": "node scrape.js"
+  },
+  "dependencies": {
+    "@upstash/redis": "1.34.0",
+    "playwright": "1.47.2"
+  }
+}

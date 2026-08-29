@@ -1,0 +1,33 @@
+name: Scrape Mercado Libre
+
+on:
+  schedule:
+    # Corre una vez por hora, en el minuto 0 (hora UTC).
+    - cron: "0 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: scraper
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Instalar dependencias
+        run: npm install
+
+      - name: Instalar navegador (Chromium)
+        run: npx playwright install --with-deps chromium
+
+      - name: Scrapear y guardar en Redis
+        env:
+          UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+          UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
+        run: npm run scrape
