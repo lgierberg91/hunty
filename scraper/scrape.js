@@ -88,13 +88,22 @@ async function firecrawlGetHtml(url, apiKey) {
   }
 
   const html = json.data && json.data.html ? json.data.html : "";
-  const statusCode = json.data && json.data.metadata ? json.data.metadata.statusCode : "?";
+  const meta = (json.data && json.data.metadata) || {};
+  const bodyTextGuess = html
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 220);
 
   // Log de diagnóstico temporal: nos dice si Firecrawl trajo una página con
-  // contenido real (aunque .poly-card no matchee) o si vino vacía/bloqueada.
+  // contenido real (aunque .poly-card no matchee) o si vino vacía/bloqueada,
+  // y qué texto hay realmente en esa página (un mensaje de bloqueo/captcha
+  // se va a notar acá aunque no haya .poly-card).
   console.log(
-    `    [debug] statusCode=${statusCode} htmlLen=${html.length} tienePolyCard=${html.includes("poly-card")} tieneResultados=${html.includes("esultado")}`
+    `    [debug] statusCode=${meta.statusCode ?? "?"} htmlLen=${html.length} tienePolyCard=${html.includes("poly-card")} title="${(meta.title || "").toString().slice(0, 80)}"`
   );
+  console.log(`    [debug] texto: "${bodyTextGuess}"`);
+  if (meta.error) console.log(`    [debug] metadata.error: ${JSON.stringify(meta.error).slice(0, 200)}`);
 
   return html;
 }
