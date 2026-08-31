@@ -6,6 +6,7 @@
   --accent: #2d9cdb;
   --new: #e0532c;
   --border: #e5e7eb;
+  --ok: #2e9e5b;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -17,6 +18,7 @@
     --accent: #59b6ef;
     --new: #ff7a52;
     --border: #2c2f36;
+    --ok: #4cbf7f;
   }
 }
 
@@ -73,6 +75,54 @@ button {
   background: transparent;
   color: var(--text);
   border: 1px solid var(--border);
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.trigger-note {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 0.85rem;
+  color: var(--text);
+  margin-bottom: 16px;
+}
+
+.status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.status-dot {
+  font-size: 0.72rem;
+  padding: 3px 9px 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  position: relative;
+  padding-left: 16px;
+}
+
+.status-dot::before {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.status-dot-error::before {
+  background: var(--new);
 }
 
 .hours-bar {

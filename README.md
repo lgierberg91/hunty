@@ -25,7 +25,10 @@ Son dos partes separadas, las dos gratis:
 2. **La webapp** (Next.js en Vercel): solo *lee* lo que el scraper ya dejó
    guardado en Redis, así que abre siempre al instante. Tiene un filtro de
    "últimas 2 / 6 / 24 / 48 horas" y muestra todo ordenado de más nuevo a
-   más viejo, con badge "NUEVO" para lo agregado recientemente.
+   más viejo, con badge "NUEVO" para lo agregado recientemente, un botón
+   "Rastrear ahora" para forzar un scrape sin ir a GitHub, y una tira de
+   estado (un punto verde/rojo por palabra clave) para ver de un vistazo si
+   el último rastreo trajo datos o falló.
 
 ## Por qué Firecrawl y no un navegador propio
 
@@ -48,14 +51,17 @@ complejidad para vos). No hay garantía de que funcione siempre —Mercado
 Libre puede endurecer sus defensas en cualquier momento— pero es la mejor
 opción realista dentro de un presupuesto gratis.
 
-> ⚠️ Si después de un tiempo notás que `lastErrors` en Redis (o los logs de
-> GitHub Actions) muestran seguido "0 resultados" para casi todas las
-> palabras clave, probablemente Mercado Libre también le está bloqueando el
-> acceso a Firecrawl. En ese caso, antes de gastar en un plan pago, vale la
-> pena revisar si Mercado Libre tiene una función nativa de **"crear
-> alerta"** sobre una búsqueda guardada (existe al menos en la versión de
-> México; no confirmamos si está en Argentina) — te avisaría de
-> publicaciones nuevas sin necesidad de scrapear nada.
+> ⚠️ **Estado actual (en investigación):** la primera corrida con Firecrawl
+> también volvió con 0 resultados en las 10 palabras clave. Agregamos logs
+> de diagnóstico (`[debug] statusCode=... htmlLen=... tienePolyCard=...`)
+> en `scraper/scrape.js` para la próxima corrida, así vemos si Firecrawl
+> trajo una página vacía/bloqueada o si trajo contenido real pero con una
+> estructura distinta a la que esperábamos. Si después de eso se sigue
+> repitiendo, antes de gastar en un plan pago vale la pena revisar si
+> Mercado Libre tiene una función nativa de **"crear alerta"** sobre una
+> búsqueda guardada (existe al menos en la versión de México; no
+> confirmamos si está en Argentina) — te avisaría de publicaciones nuevas
+> sin necesidad de scrapear nada.
 
 ## Presupuesto de créditos (por qué es 2 veces por día y no cada hora)
 
@@ -104,13 +110,33 @@ ya las usa. Los horarios están en `.github/workflows/scrape.yml` (línea del
 
 ## 3. La webapp en Vercel
 
-Ya está desplegada. Las únicas variables de entorno que necesita son las de
-Upstash (no necesita la de Firecrawl, esa la usa solo el scraper):
+Ya está desplegada. Además de las variables de Upstash, ahora tiene un
+botón **"Rastrear ahora"** que dispara el workflow de GitHub sin tener que
+entrar a GitHub — para eso necesita un token de GitHub con permiso sobre
+este repo:
 
 ```
 UPSTASH_REDIS_REST_URL=...
 UPSTASH_REDIS_REST_TOKEN=...
+GITHUB_TOKEN=ghp_... (o github_pat_...)
 ```
+
+Para crear el `GITHUB_TOKEN`:
+
+1. Entrá a https://github.com/settings/personal-access-tokens/new
+2. **Token name**: algo como "ml-watch trigger".
+3. **Repository access**: "Only select repositories" → elegí `hunty`
+   (así el token no puede tocar nada más de tu cuenta).
+4. **Permissions** → **Repository permissions** → **Actions**: ponelo en
+   **"Read and write"** (es el único permiso que necesita).
+5. Generá el token y copialo (empieza con `github_pat_`).
+6. Cargalo en Vercel: `vercel env add GITHUB_TOKEN production` (o desde el
+   dashboard, Settings → Environment Variables) y hacé `vercel --prod` de
+   nuevo para que tome la variable.
+
+El botón "Rastrear ahora" tiene un límite de un disparo cada 10 minutos
+(para no gastar créditos de Firecrawl de más si lo apretás varias veces
+seguidas por error).
 
 ## Límites / cosas a saber
 

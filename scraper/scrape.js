@@ -51,6 +51,16 @@ function sleep(ms) {
 }
 
 // Le pide a Firecrawl el HTML ya renderizado de una URL (1 crédito/página).
+//
+// onlyMainContent:false — la primera versión lo tenía en true y todas las
+// palabras clave volvieron con 0 resultados; es posible que el "detector de
+// contenido principal" de Firecrawl esté descartando la grilla de productos
+// en esta página en particular, así que pedimos el HTML completo y filtramos
+// nosotros mismos con cheerio.
+// actions wait — la página de Mercado Libre carga ~90 archivos JS antes de
+// pintar los resultados; le pedimos a Firecrawl que espere un poco extra
+// después de cargar, por si el timing por defecto no alcanza para esta SPA
+// en particular.
 async function firecrawlGetHtml(url, apiKey) {
   const res = await fetch(FIRECRAWL_SCRAPE_URL, {
     method: "POST",
@@ -61,7 +71,8 @@ async function firecrawlGetHtml(url, apiKey) {
     body: JSON.stringify({
       url,
       formats: [{ type: "html" }],
-      onlyMainContent: true,
+      onlyMainContent: false,
+      actions: [{ type: "wait", milliseconds: 4000 }],
       timeout: FIRECRAWL_TIMEOUT_MS,
     }),
   });
@@ -76,7 +87,16 @@ async function firecrawlGetHtml(url, apiKey) {
     throw new Error(`Firecrawl success:false — ${JSON.stringify(json).slice(0, 300)}`);
   }
 
-  return json.data && json.data.html ? json.data.html : "";
+  const html = json.data && json.data.html ? json.data.html : "";
+  const statusCode = json.data && json.data.metadata ? json.data.metadata.statusCode : "?";
+
+  // Log de diagnóstico temporal: nos dice si Firecrawl trajo una página con
+  // contenido real (aunque .poly-card no matchee) o si vino vacía/bloqueada.
+  console.log(
+    `    [debug] statusCode=${statusCode} htmlLen=${html.length} tienePolyCard=${html.includes("poly-card")} tieneResultados=${html.includes("esultado")}`
+  );
+
+  return html;
 }
 
 function extractCards(html) {

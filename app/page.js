@@ -41,6 +41,8 @@ export default function Home() {
   const [lastErrors, setLastErrors] = useState({});
   const [loading, setLoading] = useState(true);
   const [fetchFailed, setFetchFailed] = useState(false);
+  const [triggering, setTriggering] = useState(false);
+  const [triggerMessage, setTriggerMessage] = useState(null);
 
   const refresh = useCallback(async (h) => {
     setLoading(true);
@@ -75,6 +77,26 @@ export default function Home() {
     return () => clearInterval(id);
   }, [hours, refresh]);
 
+  async function triggerScrape() {
+    setTriggering(true);
+    setTriggerMessage(null);
+    try {
+      const res = await fetch("/api/trigger-scrape", { method: "POST" });
+      const json = await res.json();
+      if (json.ok) {
+        setTriggerMessage(
+          "Rastreo disparado. Tarda uno o dos minutos en aparecer acá — apretá \"Actualizar\" en un rato."
+        );
+      } else {
+        setTriggerMessage(json.error || "No se pudo disparar el rastreo.");
+      }
+    } catch (e) {
+      setTriggerMessage("No se pudo disparar el rastreo (error de red).");
+    } finally {
+      setTriggering(false);
+    }
+  }
+
   const totalItems = useMemo(
     () => Object.values(data).reduce((acc, items) => acc + items.length, 0),
     [data]
@@ -92,10 +114,34 @@ export default function Home() {
             {totalItems > 0 && ` · ${totalItems} publicaciones`}
           </div>
         </div>
-        <button className="btn-primary" onClick={() => refresh(hours)} disabled={loading}>
-          {loading ? "Actualizando…" : "Actualizar"}
-        </button>
+        <div className="header-actions">
+          <button className="btn-ghost" onClick={triggerScrape} disabled={triggering}>
+            {triggering ? "Disparando…" : "Rastrear ahora"}
+          </button>
+          <button className="btn-primary" onClick={() => refresh(hours)} disabled={loading}>
+            {loading ? "Actualizando…" : "Actualizar"}
+          </button>
+        </div>
       </div>
+
+      {triggerMessage && <div className="trigger-note">{triggerMessage}</div>}
+
+      {keywords.length > 0 && (
+        <div className="status-strip">
+          {keywords.map((kw) => {
+            const hasError = !!lastErrors[kw];
+            return (
+              <span
+                key={kw}
+                className={hasError ? "status-dot status-dot-error" : "status-dot status-dot-ok"}
+                title={hasError ? lastErrors[kw] : "Último rastreo OK"}
+              >
+                {kw}
+              </span>
+            );
+          })}
+        </div>
+      )}
 
       <div className="hours-bar">
         {HOUR_OPTIONS.map((h) => (
@@ -117,8 +163,8 @@ export default function Home() {
 
       {!fetchFailed && !loading && keywords.length === 0 && (
         <div className="empty">
-          Todavía no hay datos. El rastreo corre una vez por hora — esperá al primer
-          ciclo o dispará el workflow manualmente desde GitHub Actions ("Run workflow").
+          Todavía no hay datos. Probá el botón &quot;Rastrear ahora&quot; de arriba, o
+          esperá al próximo ciclo programado.
         </div>
       )}
 
