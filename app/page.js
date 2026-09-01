@@ -1,106 +1,111 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { KEYWORDS } from "../lib/keywords";
 
-const HOUR_OPTIONS = [2, 6, 24, 48];
-const DEFAULT_HOURS = 24;
-const AUTO_REFRESH_MS = 5 * 60 * 1000; // 5 min — solo relee la cache en Redis, no scrapea de nuevo
-const NEW_BADGE_WINDOW_MS = 90 * 60 * 1000; // marca "NUEVO" lo visto en la última hora y media
-
-function formatPrice(price, currency) {
-  if (price === null || price === undefined) return "Consultar precio";
-  try {
-    return new Intl.NumberFormat("es-AR", {
-      style: "currency",
-      currency: currency || "ARS",
-      maximumFractionDigits: 0,
-    }).format(price);
-  } catch (e) {
-    return `${currency ?? ""} ${price}`;
-  }
+function slugify(label) {
+  return label
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "-");
 }
 
-function formatRelative(ms) {
-  if (!ms) return "";
-  const diff = Date.now() - ms;
-  const min = Math.round(diff / 60000);
-  if (min < 1) return "recién";
-  if (min < 60) return `hace ${min} min`;
-  const hs = Math.round(min / 60);
-  if (hs < 48) return `hace ${hs} h`;
-  const days = Math.round(hs / 24);
-  return `hace ${days} d`;
+// Conversión estándar de la clave pública VAPID (base64 url-safe) al
+// Uint8Array que pide pushManager.subscribe(). Es el snippet que recomienda
+// la documentación de Web Push, no hay vuelta que darle.
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
 }
 
-export default function Home() {
-  const [hours, setHours] = useState(DEFAULT_HOURS);
-  const [keywords, setKeywords] = useState([]);
-  const [data, setData] = useState({});
-  const [errors, setErrors] = useState({});
-  const [lastScraped, setLastScraped] = useState(null);
-  const [lastErrors, setLastErrors] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [fetchFailed, setFetchFailed] = useState(false);
-  const [triggering, setTriggering] = useState(false);
-  const [triggerMessage, setTriggerMessage] = useState(null);
+// "unsupported" | "unsubscribed" | "subscribing" | "subscribed" | "unsubscribing" | "error"
+function useReminderStatus() {
+  const [status, setStatus] = useState("unsupported");
+  const [error, setError] = useState(null);
 
-  const refresh = useCallback(async (h) => {
-    setLoading(true);
-    setFetchFailed(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+
+    navigator.serviceWorker
+      .register("/sw.js")
+      .then(async (reg) => {
+        const sub = await reg.pushManager.getSubscription();
+        setStatus(sub ? "subscribed" : "unsubscribed");
+      })
+      .catch(() => setStatus("unsupported"));
+  }, []);
+
+  const subscribe = useCallback(async () => {
+    setError(null);
+    const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+    if (!vapidKey) {
+      setError("Falta configurar NEXT_PUBLIC_VAPID_PUBLIC_KEY en Vercel.");
+      setStatus("error");
+      return;
+    }
+    setStatus("subscribing");
     try {
-      const res = await fetch(`/api/search?hours=${h}`);
-      const json = await res.json();
-      if (!json.ok) {
-        setFetchFailed(true);
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        setStatus("unsubscribed");
+        setError("No diste permiso de notificaciones — no puedo activar el recordatorio.");
         return;
       }
-      setKeywords(json.keywords || []);
-      setData(json.results || {});
-      setErrors(json.errors || {});
-      setLastScraped(json.lastScraped || null);
-      setLastErrors(json.lastErrors || {});
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapidKey),
+      });
+      await fetch("/api/push/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(sub),
+      });
+      setStatus("subscribed");
     } catch (e) {
-      setFetchFailed(true);
-    } finally {
-      setLoading(false);
+      setError("No se pudo activar el recordatorio: " + (e.message || e));
+      setStatus("error");
     }
   }, []);
 
-  useEffect(() => {
-    refresh(hours);
-  }, [hours, refresh]);
-
-  // Relee cada 5 minutos por si el scraper corrió entre medio — es solo una
-  // lectura a Redis, así que no tiene costo pegarle seguido.
-  useEffect(() => {
-    const id = setInterval(() => refresh(hours), AUTO_REFRESH_MS);
-    return () => clearInterval(id);
-  }, [hours, refresh]);
-
-  async function triggerScrape() {
-    setTriggering(true);
-    setTriggerMessage(null);
+  const unsubscribe = useCallback(async () => {
+    setError(null);
+    setStatus("unsubscribing");
     try {
-      const res = await fetch("/api/trigger-scrape", { method: "POST" });
-      const json = await res.json();
-      if (json.ok) {
-        setTriggerMessage(
-          "Rastreo disparado. Tarda uno o dos minutos en aparecer acá — apretá \"Actualizar\" en un rato."
-        );
-      } else {
-        setTriggerMessage(json.error || "No se pudo disparar el rastreo.");
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        await fetch("/api/push/unsubscribe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ endpoint: sub.endpoint }),
+        });
+        await sub.unsubscribe();
       }
+      setStatus("unsubscribed");
     } catch (e) {
-      setTriggerMessage("No se pudo disparar el rastreo (error de red).");
-    } finally {
-      setTriggering(false);
+      setError("No se pudo desactivar: " + (e.message || e));
+      setStatus("error");
     }
-  }
+  }, []);
 
-  const totalItems = useMemo(
-    () => Object.values(data).reduce((acc, items) => acc + items.length, 0),
-    [data]
-  );
+  return { status, error, subscribe, unsubscribe };
+}
+
+function openAll() {
+  for (const kw of KEYWORDS) {
+    // Nombre de ventana fijo por palabra clave: si Leo aprieta el botón de
+    // nuevo más tarde, reusa la misma pestaña en vez de apilar duplicadas.
+    window.open(kw.url, `mlwatch-${slugify(kw.label)}`);
+  }
+}
+
+export default function Home() {
+  const { status, error, subscribe, unsubscribe } = useReminderStatus();
 
   return (
     <div className="page">
@@ -108,114 +113,62 @@ export default function Home() {
         <div>
           <h1>ML Watch</h1>
           <div className="subtitle">
-            {lastScraped
-              ? `Último rastreo: ${formatRelative(new Date(lastScraped).getTime())}`
-              : "Publicaciones usadas de Mercado Libre por palabra clave"}
-            {totalItems > 0 && ` · ${totalItems} publicaciones`}
+            Camisetas usadas en Mercado Libre — vos elegís cuándo mirar, en tu propia sesión
           </div>
-        </div>
-        <div className="header-actions">
-          <button className="btn-ghost" onClick={triggerScrape} disabled={triggering}>
-            {triggering ? "Disparando…" : "Rastrear ahora"}
-          </button>
-          <button className="btn-primary" onClick={() => refresh(hours)} disabled={loading}>
-            {loading ? "Actualizando…" : "Actualizar"}
-          </button>
         </div>
       </div>
 
-      {triggerMessage && <div className="trigger-note">{triggerMessage}</div>}
-
-      {keywords.length > 0 && (
-        <div className="status-strip">
-          {keywords.map((kw) => {
-            const hasError = !!lastErrors[kw];
-            return (
-              <span
-                key={kw}
-                className={hasError ? "status-dot status-dot-error" : "status-dot status-dot-ok"}
-                title={hasError ? lastErrors[kw] : "Último rastreo OK"}
-              >
-                {kw}
-              </span>
-            );
-          })}
+      <div className="open-all">
+        <button className="btn-primary btn-big" onClick={openAll}>
+          🔍 Abrir las {KEYWORDS.length} búsquedas
+        </button>
+        <div className="open-all-hint">
+          Abre una pestaña nueva por cada palabra clave, ya logueado con tu cuenta — nada de esto
+          scrapea ni automatiza Mercado Libre.
         </div>
-      )}
+      </div>
 
-      <div className="hours-bar">
-        {HOUR_OPTIONS.map((h) => (
-          <button
-            key={h}
-            className={h === hours ? "chip chip-active" : "chip"}
-            onClick={() => setHours(h)}
-          >
-            Últimas {h} hs
+      <div className="reminder">
+        <div className="reminder-text">
+          <strong>Recordatorio</strong>
+          <div className="reminder-sub">
+            Una notificación del navegador, dos veces por día (~10:00 y ~20:00 ART), para
+            acordarte de venir a apretar el botón de arriba. No hace falta tener la webapp
+            abierta.
+          </div>
+        </div>
+        {status === "unsupported" && (
+          <span className="reminder-hint">Tu navegador no soporta notificaciones push.</span>
+        )}
+        {(status === "unsubscribed" || status === "error") && (
+          <button className="btn-ghost" onClick={subscribe}>
+            Activar recordatorio
           </button>
+        )}
+        {status === "subscribing" && <button className="btn-ghost" disabled>Activando…</button>}
+        {status === "subscribed" && (
+          <button className="btn-ghost" onClick={unsubscribe}>
+            ✓ Activado — desactivar
+          </button>
+        )}
+        {status === "unsubscribing" && <button className="btn-ghost" disabled>Desactivando…</button>}
+      </div>
+      {error && <div className="error">{error}</div>}
+
+      <div className="grid-links">
+        {KEYWORDS.map((kw) => (
+          <a
+            key={kw.label}
+            className="link-card"
+            href={kw.url}
+            target={`mlwatch-${slugify(kw.label)}`}
+            rel="noopener noreferrer"
+          >
+            <span className="link-card-label">{kw.label}</span>
+            {!kw.verified && <span className="link-card-badge">revisar filtro Usado</span>}
+          </a>
         ))}
       </div>
-
-      {fetchFailed && (
-        <div className="error" style={{ marginBottom: 20 }}>
-          No se pudo leer la información. Probá actualizar de nuevo en un rato.
-        </div>
-      )}
-
-      {!fetchFailed && !loading && keywords.length === 0 && (
-        <div className="empty">
-          Todavía no hay datos. Probá el botón &quot;Rastrear ahora&quot; de arriba, o
-          esperá al próximo ciclo programado.
-        </div>
-      )}
-
-      {keywords.map((keyword) => {
-        const items = data[keyword];
-        const error = errors[keyword];
-        const scrapeError = lastErrors[keyword];
-        return (
-          <div className="group" key={keyword}>
-            <h2>
-              {keyword}
-              {items && <span className="count">({items.length})</span>}
-            </h2>
-            {error && <div className="error">Error leyendo datos: {error}</div>}
-            {!error && scrapeError && (
-              <div className="error">
-                El último rastreo de &quot;{keyword}&quot; falló: {scrapeError}. Mostrando lo
-                último que se guardó con éxito.
-              </div>
-            )}
-            {!error && items && items.length === 0 && (
-              <div className="empty">Sin publicaciones en esta ventana de tiempo.</div>
-            )}
-            {items && items.length > 0 && (
-              <div className="grid">
-                {items.map((item) => {
-                  const isNew = Date.now() - item.firstSeenAt < NEW_BADGE_WINDOW_MS;
-                  return (
-                    <a
-                      key={item.id}
-                      className="card"
-                      href={item.permalink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      {isNew && <span className="badge-new">NUEVO</span>}
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={item.thumbnail} alt={item.title} loading="lazy" />
-                      <div className="card-body">
-                        <div className="card-title">{item.title}</div>
-                        <div className="card-price">{formatPrice(item.price, item.currency)}</div>
-                        <div className="card-meta">{formatRelative(item.firstSeenAt)}</div>
-                      </div>
-                    </a>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        );
-      })}
     </div>
   );
 }

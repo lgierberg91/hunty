@@ -1,0 +1,23 @@
+name: Recordatorio ML Watch
+on:
+  schedule:
+    - cron: "0 13,23 * * *"  # 10:00 y 20:00 hora Argentina (UTC-3, sin horario de verano)
+  workflow_dispatch: {}
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - name: Instalar dependencias
+        run: npm install --omit=dev
+      - name: Mandar la notificación push
+        env:
+          UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+          UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          SITE_URL: https://hunty-blush.vercel.app
+        run: node scripts/send-reminder.js
