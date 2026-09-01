@@ -1,12 +1,12 @@
 name: Scrape Mercado Libre
 on:
   schedule:
-    - cron: "0 13,23 * * *"   # 10:00 y 20:00 ART (más una espera aleatoria de hasta 10 min, ver abajo)
+    - cron: "0 11,21 * * *"   # 8:00 y 18:00 ART + espera aleatoria de hasta 4hs (ver abajo) = termina cayendo en algun punto de 8-12hs y 18-22hs ART, centrado en 10:00/20:00
   workflow_dispatch: {}
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 260
     defaults:
       run:
         working-directory: scraper
@@ -16,11 +16,11 @@ jobs:
         with: { node-version: "20" }
       - name: Instalar dependencias
         run: npm install
-      - name: Espera aleatoria (para no arrancar siempre al minuto exacto)
+      - name: Espera aleatoria (para no arrancar siempre a la misma hora)
         if: github.event_name == 'schedule'
         run: |
-          WAIT=$((RANDOM % 600))
-          echo "Esperando ${WAIT}s antes de scrapear..."
+          WAIT=$((RANDOM % 14400))
+          echo "Esperando ${WAIT}s (hasta 4hs) antes de scrapear..."
           sleep "$WAIT"
       - name: Scrapear (vía Firecrawl) y guardar en Redis
         env:

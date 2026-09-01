@@ -36,10 +36,15 @@ const { Redis } = require("@upstash/redis");
 const KEYWORDS_FILE = path.join(__dirname, "keywords.json");
 const MAX_ITEMS_PER_KEYWORD = 50;
 const FEED_WINDOW_MS = 48 * 60 * 60 * 1000; // 48hs
-const DELAY_BETWEEN_KEYWORDS_MIN_MS = 1500;
-const DELAY_BETWEEN_KEYWORDS_MAX_MS = 5000;
+const DELAY_BETWEEN_KEYWORDS_MIN_MS = 2000;
+const DELAY_BETWEEN_KEYWORDS_MAX_MS = 10000;
 const FIRECRAWL_WAIT_MIN_MS = 3000;
-const FIRECRAWL_WAIT_MAX_MS = 6000;
+const FIRECRAWL_WAIT_MAX_MS = 8000;
+
+// Huracan es el equipo de Leo — siempre lo scrapeamos primero (es lo que
+// haria una persona real buscando esto a mano), y despues el resto en
+// orden aleatorio.
+const PRIORITY_KEYWORD = "Huracan";
 const FIRECRAWL_SCRAPE_URL = "https://api.firecrawl.dev/v2/scrape";
 const FIRECRAWL_TIMEOUT_MS = 45000;
 
@@ -79,6 +84,14 @@ function shuffle(arr) {
     [copy[i], copy[j]] = [copy[j], copy[i]];
   }
   return copy;
+}
+
+// Arma el orden de scrapeo de esta corrida: la palabra clave prioritaria
+// (si esta en la lista) siempre primero, despues el resto mezclado.
+function buildScrapeOrder(keywords, priorityKeyword) {
+  const rest = keywords.filter((k) => k !== priorityKeyword);
+  const shuffledRest = shuffle(rest);
+  return keywords.includes(priorityKeyword) ? [priorityKeyword, ...shuffledRest] : shuffledRest;
 }
 
 // Le pide a Firecrawl el HTML ya renderizado de una URL (1 crédito/página).
@@ -195,7 +208,7 @@ async function main() {
   const keywords = JSON.parse(fs.readFileSync(KEYWORDS_FILE, "utf-8"));
   // Orden de scrapeo mezclado cada corrida — el orden mostrado en la webapp
   // (mlwatch:keywords, más abajo) usa siempre el orden original del archivo.
-  const scrapeOrder = shuffle(keywords);
+  const scrapeOrder = buildScrapeOrder(keywords, PRIORITY_KEYWORD);
   console.log(`Scrapeando ${keywords.length} palabras clave vía Firecrawl (orden esta corrida: ${scrapeOrder.join(", ")})...`);
 
   const errors = {};

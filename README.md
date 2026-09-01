@@ -71,14 +71,20 @@ opción realista dentro de un presupuesto gratis.
 
 Para no tener siempre exactamente el mismo patrón de tráfico, cada corrida:
 
-- Scrapea las palabras clave en un **orden mezclado** (no siempre el mismo).
-- Espera un tiempo **aleatorio entre 1.5 y 5 segundos** entre cada palabra
-  clave (antes era siempre 1.5s fijo).
-- Le pide a Firecrawl un tiempo de renderizado **aleatorio entre 3 y 6
+- Scrapea **"Huracan" primero siempre** (es el equipo de Leo — es lo que
+  haría una persona real buscando esto a mano) y **el resto de las palabras
+  clave en orden mezclado** después.
+- Espera un tiempo **aleatorio entre 2 y 10 segundos** entre cada palabra
+  clave (antes 1.5s fijo).
+- Le pide a Firecrawl un tiempo de renderizado **aleatorio entre 3 y 8
   segundos** (antes 4s fijo).
 - Si corre por el cron programado (no si lo disparás manualmente), arranca
-  con una demora aleatoria de **hasta 10 minutos** antes de empezar a
-  scrapear, así no sale siempre al minuto exacto de las 10:00/20:00.
+  con una demora aleatoria de **hasta 4 horas**: el cron dispara a las 8:00
+  y 18:00 ART, y el scrapeo real termina cayendo en algún punto entre
+  8:00-12:00 y 18:00-22:00 ART — centrado en los horarios originales
+  (10:00/20:00) pero sin ser siempre exactos. Como el repo es público,
+  GitHub Actions no cobra por los minutos que el job pasa "dormido"
+  esperando (los repos públicos tienen minutos gratis ilimitados).
 
 Como se explica arriba, esto es buena práctica pero no el diagnóstico
 principal del bloqueo actual.
