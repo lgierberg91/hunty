@@ -16,6 +16,17 @@
 //
 // Pensado para correr desde GitHub Actions un par de veces por día (no cada
 // hora) para entrar cómodos en el plan gratis de Firecrawl (1000 créditos/mes).
+//
+// Variación aleatoria: para no tener siempre exactamente el mismo patrón
+// (mismo orden de palabras clave, mismas pausas, mismo tiempo de espera),
+// el orden de scrapeo, las pausas entre palabras clave y el tiempo de
+// espera de renderizado varían un poco en cada corrida. Ojo: según lo que
+// vimos en una corrida de diagnóstico (commit ea1414c), el bloqueo actual
+// no parece ser por patrón de comportamiento dentro de una corrida —
+// aparece ya en la primera palabra clave, con Firecrawl devolviendo la
+// pantalla de login de Mercado Libre en vez de resultados — sino por no
+// tener una sesión logueada. Esta variación es buena práctica igual, pero
+// probablemente no alcance sola para destrabar esto (ver README).
 
 const fs = require("fs");
 const path = require("path");
@@ -25,7 +36,10 @@ const { Redis } = require("@upstash/redis");
 const KEYWORDS_FILE = path.join(__dirname, "keywords.json");
 const MAX_ITEMS_PER_KEYWORD = 50;
 const FEED_WINDOW_MS = 48 * 60 * 60 * 1000; // 48hs
-const DELAY_BETWEEN_KEYWORDS_MS = 1500;
+const DELAY_BETWEEN_KEYWORDS_MIN_MS = 1500;
+const DELAY_BETWEEN_KEYWORDS_MAX_MS = 5000;
+const FIRECRAWL_WAIT_MIN_MS = 3000;
+const FIRECRAWL_WAIT_MAX_MS = 6000;
 const FIRECRAWL_SCRAPE_URL = "https://api.firecrawl.dev/v2/scrape";
 const FIRECRAWL_TIMEOUT_MS = 45000;
 
@@ -50,6 +64,23 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Entero aleatorio entre min y max (ambos inclusive).
+function randomInt(min, max) {
+  return Math.floor(min + Math.random() * (max - min + 1));
+}
+
+// Devuelve una copia del array con el orden mezclado (Fisher-Yates), sin
+// tocar el original — así el orden de scrapeo varía pero el orden que
+// mostramos en la webapp (mlwatch:keywords) se mantiene estable.
+function shuffle(arr) {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
 // Le pide a Firecrawl el HTML ya renderizado de una URL (1 crédito/página).
 //
 // onlyMainContent:false — la primera versión lo tenía en true y todas las
@@ -59,9 +90,10 @@ function sleep(ms) {
 // nosotros mismos con cheerio.
 // actions wait — la página de Mercado Libre carga ~90 archivos JS antes de
 // pintar los resultados; le pedimos a Firecrawl que espere un poco extra
-// después de cargar, por si el timing por defecto no alcanza para esta SPA
-// en particular.
+// después de cargar (con un tiempo aleatorio, no siempre el mismo), por si
+// el timing por defecto no alcanza para esta SPA en particular.
 async function firecrawlGetHtml(url, apiKey) {
+  const waitMs = randomInt(FIRECRAWL_WAIT_MIN_MS, FIRECRAWL_WAIT_MAX_MS);
   const res = await fetch(FIRECRAWL_SCRAPE_URL, {
     method: "POST",
     headers: {
@@ -72,7 +104,7 @@ async function firecrawlGetHtml(url, apiKey) {
       url,
       formats: [{ type: "html" }],
       onlyMainContent: false,
-      actions: [{ type: "wait", milliseconds: 4000 }],
+      actions: [{ type: "wait", milliseconds: waitMs }],
       timeout: FIRECRAWL_TIMEOUT_MS,
     }),
   });
@@ -100,7 +132,7 @@ async function firecrawlGetHtml(url, apiKey) {
   // y qué texto hay realmente en esa página (un mensaje de bloqueo/captcha
   // se va a notar acá aunque no haya .poly-card).
   console.log(
-    `    [debug] statusCode=${meta.statusCode ?? "?"} htmlLen=${html.length} tienePolyCard=${html.includes("poly-card")} title="${(meta.title || "").toString().slice(0, 80)}"`
+    `    [debug] statusCode=${meta.statusCode ?? "?"} htmlLen=${html.length} tienePolyCard=${html.includes("poly-card")} title="${(meta.title || "").toString().slice(0, 80)}" waitMs=${waitMs}`
   );
   console.log(`    [debug] texto: "${bodyTextGuess}"`);
   if (meta.error) console.log(`    [debug] metadata.error: ${JSON.stringify(meta.error).slice(0, 200)}`);
@@ -161,13 +193,16 @@ async function main() {
   const redis = new Redis({ url: upstashUrl, token: upstashToken });
 
   const keywords = JSON.parse(fs.readFileSync(KEYWORDS_FILE, "utf-8"));
-  console.log(`Scrapeando ${keywords.length} palabras clave vía Firecrawl...`);
+  // Orden de scrapeo mezclado cada corrida — el orden mostrado en la webapp
+  // (mlwatch:keywords, más abajo) usa siempre el orden original del archivo.
+  const scrapeOrder = shuffle(keywords);
+  console.log(`Scrapeando ${keywords.length} palabras clave vía Firecrawl (orden esta corrida: ${scrapeOrder.join(", ")})...`);
 
   const errors = {};
   const emptyResults = [];
   const now = Date.now();
 
-  for (const keyword of keywords) {
+  for (const keyword of scrapeOrder) {
     try {
       console.log(`- "${keyword}"...`);
       const items = await scrapeKeyword(keyword, firecrawlKey);
@@ -198,7 +233,9 @@ async function main() {
       console.error(`  Error con "${keyword}": ${err.message}`);
       errors[keyword] = String(err.message || err);
     }
-    await sleep(DELAY_BETWEEN_KEYWORDS_MS);
+    // Pausa aleatoria entre palabras clave (no siempre la misma), para que
+    // el patrón de tráfico no sea perfectamente regular.
+    await sleep(randomInt(DELAY_BETWEEN_KEYWORDS_MIN_MS, DELAY_BETWEEN_KEYWORDS_MAX_MS));
   }
 
   await redis.set("mlwatch:keywords", keywords);

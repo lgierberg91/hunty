@@ -1,29 +1,27 @@
 name: Scrape Mercado Libre
-
 on:
   schedule:
-    # Dos veces por día, dentro del horario en que Leo mira la app:
-    # 13:00 y 23:00 UTC = 10:00 y 20:00 hora Argentina (ART, UTC-3).
-    - cron: "0 13,23 * * *"
+    - cron: "0 13,23 * * *"   # 10:00 y 20:00 ART (más una espera aleatoria de hasta 10 min, ver abajo)
   workflow_dispatch: {}
-
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: scraper
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
+        with: { node-version: "20" }
       - name: Instalar dependencias
         run: npm install
-
+      - name: Espera aleatoria (para no arrancar siempre al minuto exacto)
+        if: github.event_name == 'schedule'
+        run: |
+          WAIT=$((RANDOM % 600))
+          echo "Esperando ${WAIT}s antes de scrapear..."
+          sleep "$WAIT"
       - name: Scrapear (vía Firecrawl) y guardar en Redis
         env:
           UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}

@@ -25,10 +25,7 @@ Son dos partes separadas, las dos gratis:
 2. **La webapp** (Next.js en Vercel): solo *lee* lo que el scraper ya dejó
    guardado en Redis, así que abre siempre al instante. Tiene un filtro de
    "últimas 2 / 6 / 24 / 48 horas" y muestra todo ordenado de más nuevo a
-   más viejo, con badge "NUEVO" para lo agregado recientemente, un botón
-   "Rastrear ahora" para forzar un scrape sin ir a GitHub, y una tira de
-   estado (un punto verde/rojo por palabra clave) para ver de un vistazo si
-   el último rastreo trajo datos o falló.
+   más viejo, con badge "NUEVO" para lo agregado recientemente.
 
 ## Por qué Firecrawl y no un navegador propio
 
@@ -51,17 +48,40 @@ complejidad para vos). No hay garantía de que funcione siempre —Mercado
 Libre puede endurecer sus defensas en cualquier momento— pero es la mejor
 opción realista dentro de un presupuesto gratis.
 
-> ⚠️ **Estado actual (en investigación):** la primera corrida con Firecrawl
-> también volvió con 0 resultados en las 10 palabras clave. Agregamos logs
-> de diagnóstico (`[debug] statusCode=... htmlLen=... tienePolyCard=...`)
-> en `scraper/scrape.js` para la próxima corrida, así vemos si Firecrawl
-> trajo una página vacía/bloqueada o si trajo contenido real pero con una
-> estructura distinta a la que esperábamos. Si después de eso se sigue
-> repitiendo, antes de gastar en un plan pago vale la pena revisar si
-> Mercado Libre tiene una función nativa de **"crear alerta"** sobre una
-> búsqueda guardada (existe al menos en la versión de México; no
-> confirmamos si está en Argentina) — te avisaría de publicaciones nuevas
-> sin necesidad de scrapear nada.
+> ⚠️ **Estado actual (en investigación):** con Firecrawl, Mercado Libre no
+> devuelve resultados vacíos como con Playwright — devuelve una **pantalla
+> de login** ("¡Hola! Para continuar, ingresa a tu cuenta..."), confirmado
+> con logs de diagnóstico. Ya descartamos que sea un tema de patrón de
+> tráfico (aparece desde la primera palabra clave de cada corrida, así que
+> agregar pausas/orden aleatorio — que ya está implementado, más abajo —
+> probablemente no alcance solo) y también descartamos la alerta nativa de
+> Mercado Libre como salida fácil: **confirmamos que "crear alerta" no
+> existe como función real en Mercado Libre Argentina** (las URLs que
+> parecían prometedoras son solo búsquedas de esas palabras).
+>
+> La pista más fuerte que tenemos: probando en el navegador logueado de Leo,
+> la misma búsqueda carga perfecto. La diferencia parece ser tener una
+> sesión real logueada. Eso significaría darle a Firecrawl acceso a la
+> cuenta de Mercado Libre de Leo (cookies de sesión o login), lo cual tiene
+> un costado de riesgo real (la cuenta podría ser marcada por actividad
+> automatizada) — es una decisión de Leo, todavía pendiente, no algo que se
+> resolvió con código.
+
+### Variación aleatoria del scraper
+
+Para no tener siempre exactamente el mismo patrón de tráfico, cada corrida:
+
+- Scrapea las palabras clave en un **orden mezclado** (no siempre el mismo).
+- Espera un tiempo **aleatorio entre 1.5 y 5 segundos** entre cada palabra
+  clave (antes era siempre 1.5s fijo).
+- Le pide a Firecrawl un tiempo de renderizado **aleatorio entre 3 y 6
+  segundos** (antes 4s fijo).
+- Si corre por el cron programado (no si lo disparás manualmente), arranca
+  con una demora aleatoria de **hasta 10 minutos** antes de empezar a
+  scrapear, así no sale siempre al minuto exacto de las 10:00/20:00.
+
+Como se explica arriba, esto es buena práctica pero no el diagnóstico
+principal del bloqueo actual.
 
 ## Presupuesto de créditos (por qué es 2 veces por día y no cada hora)
 
