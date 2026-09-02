@@ -104,6 +104,30 @@ function openAll() {
   }
 }
 
+// Escudo de cada card: un círculo con los colores reales del club +
+// iniciales (no el logo oficial, para no reproducir el isotipo del club).
+// Las dos palabras clave genéricas ("Camisetas", "Camisetas de futbol")
+// usan un ícono en vez de escudo, porque no son de un equipo.
+function Crest({ kw }) {
+  if (kw.icon) {
+    return (
+      <span className="link-card-crest link-card-crest-generic" aria-hidden="true">
+        {kw.icon}
+      </span>
+    );
+  }
+  const [a, b] = kw.colors;
+  return (
+    <span
+      className="link-card-crest"
+      aria-hidden="true"
+      style={{ background: `linear-gradient(135deg, ${a} 50%, ${b} 50%)` }}
+    >
+      {kw.initials}
+    </span>
+  );
+}
+
 export default function Home() {
   const { status, error, subscribe, unsubscribe } = useReminderStatus();
 
@@ -164,8 +188,8 @@ export default function Home() {
             target={`mlwatch-${slugify(kw.label)}`}
             rel="noopener noreferrer"
           >
+            <Crest kw={kw} />
             <span className="link-card-label">{kw.label}</span>
-            {!kw.verified && <span className="link-card-badge">revisar filtro Usado</span>}
           </a>
         ))}
       </div>

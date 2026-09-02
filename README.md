@@ -39,14 +39,14 @@ navegando de verdad en Mercado Libre: categoría "Camisetas de futbol" →
 filtro **Equipo** → filtro **Condición: Usado** → se copió la URL final
 (sin el fragmento `#...` que solo sirve para la animación del filtro).
 
-De las 10, **5 quedaron confirmadas así** (`verified: true` en el archivo):
-Camisetas de futbol, Camisetas, Boca, River y Argentina. Las otras 5
-(**Huracan, Racing, Independiente, San Lorenzo, Velez**) tienen por ahora un
-link de búsqueda simple (`verified: false`) que funciona pero puede no
-traer el filtro "Usado" ya aplicado — capaz haga falta un clic tuyo en
-"Usado" del panel de filtros de la izquierda la primera vez.
+De las 10, **8 ya quedaron confirmadas así** (`verified: true` en el
+archivo): Huracan, Camisetas de futbol, Camisetas, Boca, River, Racing,
+Argentina e Independiente. Solo **San Lorenzo y Velez** siguen con un link
+de búsqueda simple (`verified: false`) que funciona pero puede no traer el
+filtro "Usado" ya aplicado — capaz haga falta un clic tuyo en "Usado" del
+panel de filtros de la izquierda la primera vez.
 
-Es una limitación de esta sesión: cuando fui a buscar esos 5 en tu
+Es una limitación de esta sesión: cada vez que fui a buscar esos 2 en tu
 navegador, Mercado Libre empezó a tardar cada vez más en cargar la página
 (hasta quedarse colgada sin error, sin captcha, nada) — la misma firma de
 "no confío en este tráfico" que ya habíamos visto con Firecrawl, esta vez
@@ -55,7 +55,7 @@ automáticas seguidas que hice yo (no algo que vaya a pasarte a vos
 abriendo un link por vez a tu ritmo), preferí frenar ahí antes de seguir
 insistiéndole a tu cuenta.
 
-**Para terminar de verificar los 5 que faltan (te toma ~2 minutos, a tu
+**Para terminar de verificar los 2 que faltan (te toma ~1 minuto, a tu
 propio ritmo, sin ningún riesgo):**
 
 1. Abrí este link (ya viene con Usado aplicado, sin filtrar por equipo):
