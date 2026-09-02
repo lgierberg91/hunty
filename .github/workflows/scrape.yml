@@ -1,0 +1,24 @@
+name: Scraper Huracán (Apify)
+on:
+  schedule:
+    - cron: "0 13,18,1 * * *"  # 10:00, 15:00 y 22:00 hora Argentina (UTC-3)
+  workflow_dispatch: {}
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - name: Instalar dependencias
+        run: npm install --omit=dev
+      - name: Scrapear Mercado Libre y avisar si hay algo nuevo
+        env:
+          APIFY_API_TOKEN: ${{ secrets.APIFY_API_TOKEN }}
+          UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+          UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          SITE_URL: https://hunty-blush.vercel.app
+        run: node scripts/scrape.js

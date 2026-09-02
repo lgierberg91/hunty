@@ -128,6 +128,59 @@ function Crest({ kw }) {
   );
 }
 
+// Catálogo detectado automáticamente por scripts/scrape.js (vía Apify),
+// 3 veces por día. A diferencia de la grilla de abajo (que son links para
+// que abras vos), esto ya trae los resultados reales con imagen, precio y
+// badge de "NUEVO" cuando algo no estaba en la corrida anterior.
+function ScrapedCatalog() {
+  const [state, setState] = useState({ status: "loading", searches: [] });
+
+  useEffect(() => {
+    fetch("/api/catalog")
+      .then((res) => res.json())
+      .then((data) => setState({ status: "ready", searches: data.searches || [] }))
+      .catch(() => setState({ status: "error", searches: [] }));
+  }, []);
+
+  if (state.status === "loading") return null;
+  if (state.status === "error") return null;
+
+  return (
+    <div className="catalog-section">
+      {state.searches.map((search) => (
+        <div key={search.key} className="catalog-block">
+          <div className="catalog-heading">
+            <strong>{search.label}</strong>
+            <span className="catalog-heading-hint">detectado automático, 3 veces por día</span>
+          </div>
+          {search.items.length === 0 ? (
+            <div className="catalog-empty">
+              Todavía no corrió el scraper, o no encontró publicaciones. Volvé a mirar más tarde.
+            </div>
+          ) : (
+            <div className="catalog-grid">
+              {search.items.map((item) => (
+                <a key={item.id} className="catalog-card" href={item.link} target="_blank" rel="noopener noreferrer">
+                  {item.isNew && <span className="catalog-card-badge">NUEVO</span>}
+                  {item.image ? (
+                    <img className="catalog-card-image" src={item.image} alt={item.title} />
+                  ) : (
+                    <div className="catalog-card-image catalog-card-image-placeholder">👕</div>
+                  )}
+                  <div className="catalog-card-body">
+                    <div className="catalog-card-title">{item.title}</div>
+                    {item.price && <div className="catalog-card-price">{item.price}</div>}
+                  </div>
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function Home() {
   const { status, error, subscribe, unsubscribe } = useReminderStatus();
 
@@ -141,6 +194,8 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      <ScrapedCatalog />
 
       <div className="open-all">
         <button className="btn-primary btn-big" onClick={openAll}>
@@ -156,9 +211,9 @@ export default function Home() {
         <div className="reminder-text">
           <strong>Recordatorio</strong>
           <div className="reminder-sub">
-            Una notificación del navegador, dos veces por día (~10:00 y ~20:00 ART), para
-            acordarte de venir a apretar el botón de arriba. No hace falta tener la webapp
-            abierta.
+            Notificaciones del navegador: cuando el scraper de Huracán encuentra algo nuevo (hasta
+            3 veces por día), y un recordatorio genérico dos veces por día para que vengas a
+            revisar las otras búsquedas a mano. No hace falta tener la webapp abierta.
           </div>
         </div>
         {status === "unsupported" && (

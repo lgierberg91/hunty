@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "send-reminder": "node scripts/send-reminder.js"
+    "send-reminder": "node scripts/send-reminder.js",
+    "scrape": "node scripts/scrape.js"
   },
   "dependencies": {
     "@upstash/redis": "1.34.0",
