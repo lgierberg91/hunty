@@ -150,6 +150,10 @@ async function main() {
     console.log(`"${search.label}": ${items.length} resultado(s) de Apify.`);
     if (items[0]) {
       console.log("Campos del primer resultado (debug):", Object.keys(items[0]));
+      if (items[0].error) {
+        console.log("El actor devolvió un item de error, no un producto. Contenido completo:");
+        console.log(JSON.stringify(items[0], null, 2));
+      }
     }
 
     const seenKey = `mlwatch:scrape:seen:${search.key}`;
